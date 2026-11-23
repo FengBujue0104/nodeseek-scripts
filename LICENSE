@@ -1,0 +1,12 @@
+本仓库的每个脚本沿用各自上游的许可证（分文件授权）：
+
+- nodeseek-hotlist.user.js   MIT      见 LICENSES/MIT-nodeseek-hotlist.txt
+- nodeseek-level1.user.js    MIT      见 LICENSES/MIT-nodeseek-level1.txt
+- nodeseek-pro-max.user.js   GPL-3.0  见 LICENSES/GPL-3.0.txt
+  （改自 NodeSeek Pro Max by 用蚊香买榄菊，https://greasyfork.org/scripts/605053，
+   其本身基于 NodeSeek Pro+，https://greasyfork.org/scripts/602733；本仓库即修改版的对应源代码）
+
+README、测试等其余文件以 MIT 许可发布。
+
+Each userscript keeps its upstream license: hotlist and level1 are MIT,
+pro-max is GPL-3.0 as declared upstream. Full texts are in LICENSES/.

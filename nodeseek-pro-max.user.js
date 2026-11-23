@@ -3,7 +3,7 @@
 // @author       用蚊香买榄菊
 // @description  用于增强 NodeSeek/DeepFlood 论坛体验的用户脚本：提供自动签到、下拉加载、快速评论、内容过滤、等级标记、浏览历史、Callout 渲染、图片预览、快捷键等功能，并带可视化设置面板可自由开关配置。
 // @namespace    http://www.nodeseek.com/
-// @version      1.1.5-cid2
+// @version      1.1.5-cid3
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=nodeseek.com
 // @match        *://www.nodeseek.com/*
 // @match        *://www.deepflood.com/*
@@ -3970,6 +3970,48 @@ return new Response(JSON.stringify(Object.assign({},data,{redirect:target,redire
                     };
                     return clean(source);
                 };
+                // cid3：预览里的黑名单评论隐藏（官方 /api/block-list/list + 本插件「高级黑名单」）。
+                const previewBlock = { ids: new Set(), names: new Set(), at: 0, failAt: 0, pending: null };
+                const previewNorm = v => String(v || '').trim().toLowerCase();
+                const loadPreviewBlock = () => {
+                    const now = Date.now();
+                    if ((previewBlock.at && now - previewBlock.at < 60000) || (previewBlock.failAt && now - previewBlock.failAt < 15000)) return Promise.resolve();
+                    if (previewBlock.pending) return previewBlock.pending;
+                    previewBlock.pending = (async () => {
+                        try {
+                            const r = await fetch('/api/block-list/list', { credentials: 'include', headers: { Accept: 'application/json' } });
+                            const d = await r.json().catch(() => null);
+                            if (!r.ok || !d || d.success === false || !Array.isArray(d.data)) throw Error('block-list unavailable');
+                            const ids = new Set(), names = new Set();
+                            for (const item of d.data) {
+                                if (item?.block_member_id != null) ids.add(String(item.block_member_id));
+                                const n = previewNorm(item?.block_member_name); if (n) names.add(n);
+                            }
+                            previewBlock.ids = ids; previewBlock.names = names; previewBlock.at = Date.now(); previewBlock.failAt = 0;
+                        } catch { previewBlock.failAt = Date.now(); } // 失败时沿用上次成功的名单（首次失败则不隐藏）
+                        finally { previewBlock.pending = null; }
+                    })();
+                    return previewBlock.pending;
+                };
+                const previewLocalBlacklist = () => {
+                    if (!ctx.store.get('relation.blacklist_enabled', true)) return null;
+                    try { const m = JSON.parse(localStorage.getItem('nsx_advanced_blacklist') || '{}'); return m && typeof m === 'object' ? m : null; } catch { return null; }
+                };
+                const isPreviewBlocked = (uid, name, record, local) => {
+                    if (record?.blocked === true) return true;
+                    const id = /^\d+$/.test(String(uid ?? '')) ? String(uid) : '';
+                    const n = String(name || '').trim();
+                    if (id && previewBlock.ids.has(id)) return true;
+                    if (n && previewBlock.names.has(previewNorm(n))) return true;
+                    if (!local) return false;
+                    const globalMode = ctx.store.get('relation.blacklist_mode', 'fold');
+                    for (const [un, info] of Object.entries(local)) {
+                        if (!((n && un === n) || (id && info?.userId != null && String(info.userId) === id))) continue;
+                        const raw = info?.mode === 'hide' ? 'official' : (info?.mode || (globalMode === 'hide' ? 'official' : globalMode));
+                        if (raw !== 'mark') return true; // 「标记模式」只做标记，不隐藏
+                    }
+                    return false;
+                };
                 const setup = row => {
                     if (states.has(row) || row.closest('.nsx-preview-panel')) return;
                     const heading = row.querySelector('.post-title');
@@ -4004,6 +4046,7 @@ return new Response(JSON.stringify(Object.assign({},data,{redirect:target,redire
                         state.controller?.abort(); const controller = new AbortController(); state.controller = controller;
                         const generation = ++state.generation; const timer = setTimeout(()=>controller.abort(),15000);
                         status.textContent = '正在加载正文和评论…'; panel.setAttribute('aria-busy','true');
+                        const blockReady = loadPreviewBlock();
                         try {
                             const response = await fetch(url.href,{credentials:'same-origin',signal:controller.signal});
                             if (!response.ok || !samePost(response.url,id)) throw Error('无法读取帖子，请打开原帖检查登录或访问权限');
@@ -4031,7 +4074,16 @@ return new Response(JSON.stringify(Object.assign({},data,{redirect:target,redire
                                 entry.append(title,safeContent(node,url.href));fragment.append(entry);
                             };
                             if (main && !main.closest('.comments')) appendEntry(main,'帖子正文',null);
+                            await blockReady;
+                            if (generation !== state.generation || panel.hidden || !row.isConnected) return;
+                            const localBlacklist = previewLocalBlacklist();
+                            let blockedCount = 0;
                             for (const [index,comment] of comments.entries()) {
+                                const floorKey = /^\d+$/.test(comment.id || '') ? comment.id : comment.querySelector('.floor-link')?.textContent.trim().replace(/^#/, '');
+                                const blockRecord = commentData.find(c => floorKey && String(c?.floorIndex) === floorKey) || null;
+                                const blockUid = comment.querySelector('a[href*="/space/"]')?.getAttribute('href')?.match(/\/space\/(\d+)/)?.[1] || blockRecord?.poster?.uid;
+                                const blockName = comment.querySelector('.author-name')?.textContent || [...comment.querySelectorAll('a[href*="/space/"]')].find(a=>a.textContent.trim())?.textContent || blockRecord?.poster?.name;
+                                if (isPreviewBlocked(blockUid, blockName, blockRecord, localBlacklist)) { blockedCount++; continue; }
                                 const content = comment.querySelector('.post-content, .comment-content, .content') || comment;
                                 const authorLink = [...comment.querySelectorAll('a[href*="/space/"]')].find(a=>a.textContent.trim());
                                 const record=commentData[index] || {};
@@ -4073,7 +4125,7 @@ return new Response(JSON.stringify(Object.assign({},data,{redirect:target,redire
                             for(const page of knownPages)pageButton(page,String(page));
                             if(knownPages.some(page=>page>currentPage))pageButton(currentPage+1,'下一页');
                             const original=document.createElement('a');original.href=url.href;original.target='_blank';original.rel='noopener noreferrer';original.textContent='打开原帖 ↗';nav.append(original);
-                            state.url=url.href;state.loaded=true;status.textContent=`第 ${currentPage} 页 · 本页 ${comments.length} 条评论`;
+                            state.url=url.href;state.loaded=true;status.textContent=`第 ${currentPage} 页 · 本页 ${comments.length} 条评论`+(blockedCount?`（已隐藏黑名单 ${blockedCount} 条）`:'');
                         } catch(error) {
                             if(generation!==state.generation||panel.hidden)return;
                             status.textContent=controller.signal.aborted?'加载超时，请重试':error.message;

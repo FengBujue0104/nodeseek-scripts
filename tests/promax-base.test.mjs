@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 const s = fs.readFileSync(new URL('../nodeseek-pro-max.user.js', import.meta.url), 'utf8');
-assert.match(s, /\/\/ @version\s+1\.1\.5-cid2\n/);
+assert.match(s, /\/\/ @version\s+1\.1\.5-cid3\n/);
 assert.match(s, /\/\/ @downloadURL\s+https:\/\/scripts\.fengbujue\.com\/nodeseek\/nodeseek-pro-max\.user\.js\n/);
 assert.match(s, /\/\/ @updateURL\s+https:\/\/scripts\.fengbujue\.com\/nodeseek\/nodeseek-pro-max\.meta\.js\n/);
 // 1.1.5-cid1 的「打开预览」白底黑字样式

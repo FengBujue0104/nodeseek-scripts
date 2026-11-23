@@ -5,7 +5,7 @@
 | 脚本 | 版本 | 安装 |
 | --- | --- | --- |
 | NodeSeek 热榜插件 | 1.3 | [nodeseek-hotlist.user.js](https://scripts.fengbujue.com/nodeseek/nodeseek-hotlist.user.js) |
-| NodeSeek Pro Max（cid 改版） | 1.4.42-cid1 | [nodeseek-pro-max.user.js](https://scripts.fengbujue.com/nodeseek/nodeseek-pro-max.user.js) |
+| NodeSeek Pro Max（cid 改版） | 1.1.5-cid2 | [nodeseek-pro-max.user.js](https://scripts.fengbujue.com/nodeseek/nodeseek-pro-max.user.js) |
 | NodeSeek 一级及以下标记与屏蔽 | 1.0.4-cid2 | [nodeseek-level1.user.js](https://scripts.fengbujue.com/nodeseek/nodeseek-level1.user.js) |
 
 安装前请先停用或删除同名的旧版（Greasy Fork / GitHub 上游版本），以免功能重复执行。
@@ -20,13 +20,16 @@
 
 当前页面帖子列表里带锁形等级标记的帖子直接复用列表信息，不额外请求。检查只针对需要显示的前 15 条左右（展开全部后再查其余），最多 3 路并发，结果按账号缓存（可见 20 分钟、隐藏 60 分钟）。遇到网络错误、Cloudflare 质询、429/5xx 等无法判断的情况一律不隐藏。鼠标悬停在底部「x分前更新」上可以看到当前等级和各类隐藏数量。
 
-## NodeSeek Pro Max（1.4.42-cid1）
+## NodeSeek Pro Max（1.1.5-cid2）
 
-基于上游 [NodeSeek Pro Max](https://greasyfork.org/scripts/605053) 1.4.42，保留本仓库的改动：
+基于上游 [NodeSeek Pro Max](https://greasyfork.org/scripts/605053) **1.1.5 的本人修改版（1.1.5-cid1）**，**未合并上游后续版本**。相对 1.1.5-cid1 只有以下改动：
 
-- 「打开预览」按钮固定白底黑字（浅色 / 深色模式一致）；
-- **新增「回复后停留在当前楼层（不跳到最后一楼）」**，在设置面板「🧭 辅助工具」里，默认开启。NodeSeek 发表评论成功后会跳到最后一页的新楼层；开启后会刷新回你所在的那一页，并恢复到回复前视口顶部的那一楼。新楼层不在当前页时，底部会提示「查看 #N 楼」。编辑评论的行为不变。
-- 上游的 Greasy Fork 更新地址已移除，改为本仓库地址。因版本号带 `-cid` 后缀，上游的「版本更新说明」弹窗不会出现。
+- **新增「回复后停留在当前楼层（不跳到最后一楼）」**，在设置面板「🧭 辅助工具」里，默认开启。NodeSeek 发表评论成功后会跳到最后一页的新楼层；开启后会刷新回你所在的那一页（开了评论下拉加载时按你正在看的楼层计算页码），并恢复到回复前视口顶部的那一楼。新楼层不在当前页时，底部会提示「查看 #N 楼」。编辑评论的行为不变。
+- 加了本仓库的 `@downloadURL` / `@updateURL` / 主页地址，版本号改为 1.1.5-cid2。
+
+1.1.5-cid1 原有的改动（「打开预览」按钮固定白底黑字，浅色 / 深色模式一致）保持不变。
+
+> 如果之前装过本仓库短暂发布的 1.4.42-cid1（误合并了上游 1.4.42），Tampermonkey 不会从高版本“更新”回 1.1.5-cid2，请打开上面的安装链接手动重新安装覆盖（或先删除旧脚本再安装）。
 
 ## NodeSeek 一级及以下标记与屏蔽（1.0.4-cid2）
 

@@ -5,7 +5,7 @@
 | 脚本 | 版本 | 安装 |
 | --- | --- | --- |
 | NodeSeek 热榜插件 | 1.3 | [nodeseek-hotlist.user.js](https://scripts.fengbujue.com/nodeseek/nodeseek-hotlist.user.js) |
-| NodeSeek Pro Max（cid 改版） | 1.1.5-cid3 | [nodeseek-pro-max.user.js](https://scripts.fengbujue.com/nodeseek/nodeseek-pro-max.user.js) |
+| NodeSeek Pro Max（cid 改版） | 1.1.5-cid4 | [nodeseek-pro-max.user.js](https://scripts.fengbujue.com/nodeseek/nodeseek-pro-max.user.js) |
 | NodeSeek 一级及以下标记与屏蔽 | 1.0.4-cid2 | [nodeseek-level1.user.js](https://scripts.fengbujue.com/nodeseek/nodeseek-level1.user.js) |
 
 安装前请先停用或删除同名的旧版（Greasy Fork / GitHub 上游版本），以免功能重复执行。
@@ -20,13 +20,14 @@
 
 当前页面帖子列表里带锁形等级标记的帖子直接复用列表信息，不额外请求。检查只针对需要显示的前 15 条左右（展开全部后再查其余），最多 3 路并发，结果按账号缓存（可见 20 分钟、隐藏 60 分钟）。遇到网络错误、Cloudflare 质询、429/5xx 等无法判断的情况一律不隐藏。鼠标悬停在底部「x分前更新」上可以看到当前等级和各类隐藏数量。
 
-## NodeSeek Pro Max（1.1.5-cid3）
+## NodeSeek Pro Max（1.1.5-cid4）
 
 基于上游 [NodeSeek Pro Max](https://greasyfork.org/scripts/605053) **1.1.5 的本人修改版（1.1.5-cid1）**，**未合并上游后续版本**。相对 1.1.5-cid1 只有以下改动：
 
 - **1.1.5-cid2：新增「回复后停留在当前楼层（不跳到最后一楼）」**，在设置面板「🧭 辅助工具」里，默认开启。NodeSeek 发表评论成功后会跳到最后一页的新楼层；开启后会刷新回你所在的那一页（开了评论下拉加载时按你正在看的楼层计算页码），并恢复到回复前视口顶部的那一楼。新楼层不在当前页时，底部会提示「查看 #N 楼」。编辑评论的行为不变。
 - **1.1.5-cid3：列表「打开预览」里隐藏黑名单用户的评论。** 名单来自 NodeSeek 官方黑名单（`/api/block-list/list`，缓存 60 秒）和本插件的「高级黑名单」（开启时生效，「标记模式」的条目只标记不隐藏），另外帖子数据里标记为 `blocked` 的评论也会隐藏。优先按用户 ID 匹配，其次按用户名。名单读取失败时不隐藏。状态栏显示「本页 N 条评论（已隐藏黑名单 k 条）」，楼层号保持原样。
-- 加了本仓库的 `@downloadURL` / `@updateURL` / 主页地址，当前版本号 1.1.5-cid3。
+- **1.1.5-cid4：列表「打开预览」里评论自动翻页。** 在预览框里滚到底部附近会自动读取下一页并接在后面（按楼号去重，不重复显示正文，黑名单过滤对每一页都生效）。底部提示「继续下滑自动加载第 N 页 / 正在加载… / 已到最后一页」，加载失败时显示「重试」按钮，不会因继续滚动反复请求。状态栏显示已加载的页码范围、总页数、累计评论数和累计隐藏数。原有的页码 / 上一页 / 下一页按钮照常可用（点了会整页切换，然后从那一页继续自动翻页）。开关在设置「🧭 辅助工具 → 列表帖子预览 → 预览内评论自动翻页」，默认开启；它独立于「自动加载下一页(评论)」（那个是帖子页用的，默认关）。
+- 加了本仓库的 `@downloadURL` / `@updateURL` / 主页地址，当前版本号 1.1.5-cid4。
 
 1.1.5-cid1 原有的改动（「打开预览」按钮固定白底黑字，浅色 / 深色模式一致）保持不变。
 

@@ -3,7 +3,7 @@
 // @author       用蚊香买榄菊
 // @description  用于增强 NodeSeek/DeepFlood 论坛体验的用户脚本：提供自动签到、下拉加载、快速评论、内容过滤、等级标记、浏览历史、Callout 渲染、图片预览、快捷键等功能，并带可视化设置面板可自由开关配置。
 // @namespace    http://www.nodeseek.com/
-// @version      1.1.5-cid3
+// @version      1.1.5-cid4
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=nodeseek.com
 // @match        *://www.nodeseek.com/*
 // @match        *://www.deepflood.com/*
@@ -3908,8 +3908,8 @@ return new Response(JSON.stringify(Object.assign({},data,{redirect:target,redire
 
         const postPreview = {
             id: 'postPreview', order: 386,
-            cfg: { post_preview: { enabled: true } },
-            meta: { post_preview: { label: '列表帖子预览', group: '🧭 辅助工具' } },
+            cfg: { post_preview: { enabled: true, auto_next: true } },
+            meta: { post_preview: { label: '列表帖子预览', group: '🧭 辅助工具', fields: { auto_next: { type: 'SWITCH', label: '预览内评论自动翻页' } } } },
             match: ctx => !ctx.isPost && ctx.store.get('post_preview.enabled', true),
             init(ctx) {
                 const rows = '.post-list-item, .post-list .list-item';
@@ -4041,11 +4041,29 @@ return new Response(JSON.stringify(Object.assign({},data,{redirect:target,redire
                         }
                     },{passive:false});
                     const state = { controller: null, generation: 0, loaded: false, url: first }; states.set(row,state);
-                    const load = async destination => {
+                    // cid4：预览内评论自动翻页。滚到预览底部附近时同源抓取下一页并追加（按楼号去重，沿用黑名单过滤）。
+                    const autoNext = ctx.store.get('post_preview.auto_next', true);
+                    Object.assign(state, { appending: false, autoError: false, seen: new Set(), firstPage: 1, lastPage: 1, nextPage: null, totalPages: null, fetchedCount: 0, blockedTotal: 0 });
+                    const autoTip = document.createElement('div'); autoTip.className = 'nsx-preview-nav nsx-preview-autonext'; autoTip.style.cssText = 'justify-content:center;opacity:.8;font-size:12px';
+                    const setAutoTip = (text, retryUrl) => {
+                        autoTip.replaceChildren(text);
+                        if (retryUrl) { const retry=document.createElement('button');retry.type='button';retry.textContent='重试';retry.onclick=e=>{e.preventDefault();e.stopPropagation();state.autoError=false;load(retryUrl,true);};autoTip.append(retry); }
+                    };
+                    const autoStatus = () => `第 ${state.firstPage}${state.lastPage>state.firstPage?`–${state.lastPage}`:''} 页${state.totalPages?` / 共 ${state.totalPages} 页`:''} · 已加载 ${state.fetchedCount} 条评论`+(state.blockedTotal?`（已隐藏黑名单 ${state.blockedTotal} 条）`:'');
+                    const maybeAutoNext = () => {
+                        if (!autoNext || panel.hidden || !state.loaded || state.appending || state.autoError || !state.nextPage || !row.isConnected) return;
+                        if (body.scrollHeight - body.scrollTop - body.clientHeight <= 240) load(`/post-${id}-${state.nextPage}`, true);
+                    };
+                    if (autoNext) body.addEventListener('scroll', maybeAutoNext, { passive: true });
+                    const load = async (destination, append = false) => {
                         const url = samePost(destination,id); if (!url) return;
+                        if (append && (state.appending || !state.loaded)) return;
                         state.controller?.abort(); const controller = new AbortController(); state.controller = controller;
                         const generation = ++state.generation; const timer = setTimeout(()=>controller.abort(),15000);
-                        status.textContent = '正在加载正文和评论…'; panel.setAttribute('aria-busy','true');
+                        const loadingPage = Number(url.pathname.match(/-(\d+)\/?$/)[1]);
+                        if (append) { state.appending = true; setAutoTip(`正在加载第 ${loadingPage} 页…`); }
+                        else status.textContent = '正在加载正文和评论…';
+                        panel.setAttribute('aria-busy','true');
                         const blockReady = loadPreviewBlock();
                         try {
                             const response = await fetch(url.href,{credentials:'same-origin',signal:controller.signal});
@@ -4073,13 +4091,17 @@ return new Response(JSON.stringify(Object.assign({},data,{redirect:target,redire
                                 } else title.textContent=label;
                                 entry.append(title,safeContent(node,url.href));fragment.append(entry);
                             };
-                            if (main && !main.closest('.comments')) appendEntry(main,'帖子正文',null);
+                            if (!append && main && !main.closest('.comments')) appendEntry(main,'帖子正文',null);
                             await blockReady;
                             if (generation !== state.generation || panel.hidden || !row.isConnected) return;
                             const localBlacklist = previewLocalBlacklist();
                             let blockedCount = 0;
+                            const seen = append ? state.seen : new Set();
+                            let newCount = 0;
                             for (const [index,comment] of comments.entries()) {
                                 const floorKey = /^\d+$/.test(comment.id || '') ? comment.id : comment.querySelector('.floor-link')?.textContent.trim().replace(/^#/, '');
+                                if (autoNext && floorKey) { if (floorKey === '0' || seen.has(floorKey)) continue; seen.add(floorKey); }
+                                newCount++;
                                 const blockRecord = commentData.find(c => floorKey && String(c?.floorIndex) === floorKey) || null;
                                 const blockUid = comment.querySelector('a[href*="/space/"]')?.getAttribute('href')?.match(/\/space\/(\d+)/)?.[1] || blockRecord?.poster?.uid;
                                 const blockName = comment.querySelector('.author-name')?.textContent || [...comment.querySelectorAll('a[href*="/space/"]')].find(a=>a.textContent.trim())?.textContent || blockRecord?.poster?.name;
@@ -4095,7 +4117,8 @@ return new Response(JSON.stringify(Object.assign({},data,{redirect:target,redire
                                 const label=(named?.trim() || (/^\d+$/.test(String(uid||''))?`用户 ${uid}`:'评论者信息未提供'))+(floor?' · '+floor:'');
                                 appendEntry(content,label,uid);
                             }
-                            body.replaceChildren(fragment);body.scrollTop=0;nav.replaceChildren();
+                            if (append) autoTip.before(fragment); else { body.replaceChildren(fragment); if (autoNext) body.append(autoTip); body.scrollTop=0; }
+                            nav.replaceChildren();
                             const currentPage = Number(url.pathname.match(/-(\d+)\/?$/)[1]);
                             const pages = new Map([[1,'1'],[currentPage,String(currentPage)]]);
                             const addPage = value => {const n=Number(value);if(Number.isSafeInteger(n)&&n>0&&n<=100000)pages.set(n,String(n));};
@@ -4126,11 +4149,24 @@ return new Response(JSON.stringify(Object.assign({},data,{redirect:target,redire
                             if(knownPages.some(page=>page>currentPage))pageButton(currentPage+1,'下一页');
                             const original=document.createElement('a');original.href=url.href;original.target='_blank';original.rel='noopener noreferrer';original.textContent='打开原帖 ↗';nav.append(original);
                             state.url=url.href;state.loaded=true;status.textContent=`第 ${currentPage} 页 · 本页 ${comments.length} 条评论`+(blockedCount?`（已隐藏黑名单 ${blockedCount} 条）`:'');
+                            if (autoNext) {
+                                const pageCount = Number(postData.postPageCount ?? totalPages);
+                                state.totalPages = Number.isSafeInteger(pageCount) && pageCount > 0 && pageCount <= 100000 ? pageCount : null;
+                                const hasNext = state.totalPages ? currentPage < state.totalPages
+                                    : [...doc.querySelectorAll('.nsk-pager a.pager-next[href], a[rel="next"][href]')].some(a => { const t = samePost(a.getAttribute('href'), id); return t && Number(t.pathname.match(/-(\d+)\/?$/)[1]) === currentPage + 1; });
+                                if (!append) { state.seen = seen; state.firstPage = currentPage; state.fetchedCount = 0; state.blockedTotal = 0; }
+                                state.lastPage = currentPage; state.nextPage = hasNext ? currentPage + 1 : null; state.autoError = false;
+                                state.fetchedCount += newCount; state.blockedTotal += blockedCount;
+                                status.textContent = autoStatus();
+                                setAutoTip(state.nextPage ? `继续下滑自动加载第 ${state.nextPage} 页` : (state.lastPage > state.firstPage || state.totalPages ? '已到最后一页' : ''));
+                                setTimeout(maybeAutoNext, 0);
+                            }
                         } catch(error) {
                             if(generation!==state.generation||panel.hidden)return;
+                            if (append) { state.autoError = true; setAutoTip(`第 ${loadingPage} 页${controller.signal.aborted?'加载超时':'加载失败：'+error.message}`, url.href); return; }
                             status.textContent=controller.signal.aborted?'加载超时，请重试':error.message;
                             nav.replaceChildren();const retry=document.createElement('button');retry.type='button';retry.textContent='重试';retry.onclick=()=>load(url.href);const original=document.createElement('a');original.href=url.href;original.target='_blank';original.rel='noopener noreferrer';original.textContent='打开原帖 ↗';nav.append(retry,original);
-                        } finally { clearTimeout(timer);if(generation===state.generation)panel.removeAttribute('aria-busy'); }
+                        } finally { clearTimeout(timer);if(append){state.appending=false;if(panel.hidden&&state.nextPage&&!state.autoError)setAutoTip(`继续下滑自动加载第 ${state.nextPage} 页`);}if(generation===state.generation)panel.removeAttribute('aria-busy'); }
                     };
                     toggle.onclick=e=>{e.preventDefault();e.stopPropagation();panel.hidden=!panel.hidden;toggle.textContent=panel.hidden?'打开预览':'关闭预览';toggle.setAttribute('aria-expanded',String(!panel.hidden));if(panel.hidden){state.generation++;state.controller?.abort();panel.removeAttribute('aria-busy');}else if(!state.loaded)load(state.url);};
                 };

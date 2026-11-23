@@ -40,7 +40,7 @@ async function run({ blockList, local = null, relCfg = {}, blockedFlag = [], blo
   w.__mod.init(w.__ctx);
   const open = async () => {
     w.document.querySelector('.nsx-preview-toggle').click();
-    for (let i = 0; i < 50 && !/本页/.test(w.document.querySelector('.nsx-preview-status').textContent); i++) await new Promise(r => setTimeout(r, 20));
+    for (let i = 0; i < 50 && !/本页|已加载/.test(w.document.querySelector('.nsx-preview-status').textContent); i++) await new Promise(r => setTimeout(r, 20));
   };
   await open();
   const shown = () => [...w.document.querySelectorAll('.nsx-preview-entry')].map(e => e.textContent.replace(/\s+/g, ' ').trim());
@@ -52,7 +52,7 @@ const comments = r => r.shown().filter(t => /comment-/.test(t)).map(t => t.match
   const r = await run({ blockList: [{ block_member_id: 12, block_member_name: 'x' }, { block_member_id: 999, block_member_name: 'EVE' }] });
   assert.deepEqual(comments(r), ['4', '1', '3']);
   assert.ok(r.shown()[0].includes('main'), 'main post kept');
-  assert.match(r.status(), /本页 5 条评论（已隐藏黑名单 2 条）/);
+  assert.match(r.status(), /(本页|已加载) 5 条评论（已隐藏黑名单 2 条）/);
   assert.ok(r.shown().some(t => t.includes('dave · #4')), 'floor label kept');
   // 60 秒内再次打开不重复请求
   r.w.document.querySelector('.nsx-preview-toggle').click();
@@ -63,7 +63,7 @@ const comments = r => r.shown().filter(t => /comment-/.test(t)).map(t => t.match
 { // 接口失败：不隐藏
   const r = await run({ blockList: [], blockStatus: 500 });
   assert.deepEqual(comments(r), ['4', '1', '2', '3', '5']);
-  assert.match(r.status(), /本页 5 条评论$/);
+  assert.match(r.status(), /(本页|已加载) 5 条评论$/);
   console.log('failure no-hide ok');
 }
 { // 页面数据 blocked 标记（按楼层对齐，不受热评置顶影响）

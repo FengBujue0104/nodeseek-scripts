@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "check": "node --check nodeseek-hotlist.user.js && node --check nodeseek-pro-max.user.js && node --check nodeseek-level1.user.js",
-    "test": "npm run check && node tests/hotlist.test.mjs && node tests/replystay.test.mjs && node tests/promax-base.test.mjs && node tests/preview-blacklist.test.mjs && node tests/preview-autonext.test.mjs"
+    "test": "npm run check && node tests/hotlist.test.mjs && node tests/replystay.test.mjs && node tests/promax-base.test.mjs && node tests/preview-blacklist.test.mjs && node tests/preview-autonext.test.mjs && node tests/notify-block.test.mjs"
   },
   "devDependencies": { "jsdom": "^25.0.1" }
 }

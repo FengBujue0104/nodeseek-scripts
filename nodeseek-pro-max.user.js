@@ -3,7 +3,7 @@
 // @author       用蚊香买榄菊
 // @description  用于增强 NodeSeek/DeepFlood 论坛体验的用户脚本：提供自动签到、下拉加载、快速评论、内容过滤、等级标记、浏览历史、Callout 渲染、图片预览、快捷键等功能，并带可视化设置面板可自由开关配置。
 // @namespace    http://www.nodeseek.com/
-// @version      1.1.5-cid4
+// @version      1.1.5-cid5
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=nodeseek.com
 // @match        *://www.nodeseek.com/*
 // @match        *://www.deepflood.com/*
@@ -1149,6 +1149,236 @@ return new Response(JSON.stringify(Object.assign({},data,{redirect:target,redire
         __proto__: null,
         default: replyStay
     }, Symbol.toStringTag, { value: 'Module' }));
+
+    /* ==========================================================================
+       [ 🧭 辅助工具 ] - 隐藏黑名单用户的通知（cid5 新增）
+       NodeSeek 通知页 /notification 用 /api/notification/{at-me,reply-to-me}/list（data[]：
+       commenter_id / commenter_name / viewed）和 /api/notification/message/list（msgArray[]：
+       sender_id / receiver_id / sender_name / receiver_name / viewed，每个会话一行）拉列表，
+       未读数来自 __config__.user.unViewedCount 与 /api/notification/unread-count（unreadCount：
+       all / atMe / reply / message）。这里在页面环境包一层 fetch：列表里去掉黑名单用户的条目，
+       未读数减去黑名单用户的未读条数；另用 MutationObserver 隐藏已渲染出来的条目作兜底。
+       ========================================================================== */
+    function nsxAdjustUnread(counts, stats) {
+        if (!counts || typeof counts !== "object" || !stats) return counts;
+        const out = Object.assign({}, counts);
+        let reduced = 0;
+        for (const k of ["atMe", "reply", "message"]) {
+            const s = stats[k], c = Number(counts[k]);
+            if (!s || !Number.isFinite(c) || c <= 0 || !(s.blocked > 0)) continue;
+            const normal = Math.max(0, Number(s.normal) || 0);
+            let v = Math.max(normal, c - s.blocked);
+            // 私信可能按条计数而列表按会话：未读会话全是黑名单且计数没变时才直接归零
+            if (k === "message" && normal === 0 && c === Number(s.raw)) v = 0;
+            v = Math.min(c, Math.max(0, v));
+            reduced += c - v;
+            out[k] = v;
+        }
+        const all = Number(counts.all);
+        if (reduced && Number.isFinite(all)) out.all = Math.max(0, all - reduced);
+        return out;
+    }
+
+    function nsxNotifyBlockInstall(win, opts) {
+        if (win.__nsxNotifyBlock) return win.__nsxNotifyBlock;
+        const doc = win.document;
+        const origFetch = win.fetch.bind(win);
+        const adjust = opts.adjust;
+        const LISTS = { atMe: "/api/notification/at-me/list", reply: "/api/notification/reply-to-me/list", message: "/api/notification/message/list" };
+        const block = { ids: new Set(), names: new Set(), at: 0, failAt: 0, ok: false, pending: null };
+        const norm = v => String(v || "").trim().toLowerCase();
+        const me = () => win.__config__ && win.__config__.user;
+        const loadBlock = () => {
+            const now = Date.now();
+            if ((block.at && now - block.at < 60000) || (block.failAt && now - block.failAt < 15000)) return Promise.resolve(block.ok);
+            if (block.pending) return block.pending;
+            block.pending = (async () => {
+                try {
+                    const r = await origFetch("/api/block-list/list", { credentials: "include", headers: { Accept: "application/json" } });
+                    const d = await r.json();
+                    if (!r.ok || !d || d.success === false || !Array.isArray(d.data)) throw Error("block-list");
+                    const ids = new Set(), names = new Set();
+                    for (const it of d.data) { if (it && it.block_member_id != null) ids.add(String(it.block_member_id)); const n = norm(it && it.block_member_name); if (n) names.add(n); }
+                    block.ids = ids; block.names = names; block.at = Date.now(); block.failAt = 0; block.ok = true;
+                } catch (e) { block.failAt = Date.now(); }
+                finally { block.pending = null; }
+                return block.ok;
+            })();
+            return block.pending;
+        };
+        const localList = () => {
+            if (!opts.localEnabled) return null;
+            try { const m = JSON.parse(win.localStorage.getItem("nsx_advanced_blacklist") || "{}"); return m && typeof m === "object" ? m : null; } catch (e) { return null; }
+        };
+        const ready = () => block.ok || !!(localList() && Object.keys(localList()).length);
+        const isBlocked = (uid, name) => {
+            const id = /^\d+$/.test(String(uid == null ? "" : uid)) ? String(uid) : "";
+            const n = String(name || "").trim();
+            if (id && block.ids.has(id)) return true;
+            if (n && block.names.has(norm(n))) return true;
+            const local = localList();
+            if (!local) return false;
+            for (const un of Object.keys(local)) {
+                const info = local[un];
+                if (!((n && un === n) || (id && info && info.userId != null && String(info.userId) === id))) continue;
+                const mode = info && info.mode === "hide" ? "official" : ((info && info.mode) || (opts.globalMode === "hide" ? "official" : opts.globalMode));
+                if (mode !== "mark") return true;
+            }
+            return false;
+        };
+        const peerOf = row => {
+            const myId = String((me() && me().member_id) || "");
+            const sent = myId && String(row.sender_id) === myId;
+            return sent ? { id: row.receiver_id, name: row.receiver_name, incoming: false } : { id: row.sender_id, name: row.sender_name, incoming: true };
+        };
+        const statFromList = (k, json) => {
+            let blocked = 0, normal = 0;
+            if (k === "message") {
+                for (const row of json.msgArray) { const p = peerOf(row); if (!p.incoming || row.viewed) continue; isBlocked(p.id, p.name) ? blocked++ : normal++; }
+            } else {
+                for (const it of json.data) { if (!it || it.viewed) continue; isBlocked(it.commenter_id, it.commenter_name) ? blocked++ : normal++; }
+            }
+            return { blocked, normal };
+        };
+        const validList = (k, json) => json && json.success === true && Array.isArray(k === "message" ? json.msgArray : json.data);
+        const state = { raw: null, stats: null, statsAt: 0, pending: null };
+        const snapshotRaw = () => { const u = me(); return u && u.unViewedCount && typeof u.unViewedCount === "object" ? Object.assign({}, u.unViewedCount) : null; };
+        state.raw = snapshotRaw();
+        const sameRaw = raw => state.stats && ["atMe", "reply", "message"].every(k => !state.stats[k] || Number(state.stats[k].raw) === Number(raw[k]));
+        const computeStats = async raw => {
+            if (!(await loadBlock()) && !ready()) return null;
+            const stats = {};
+            await Promise.all(Object.keys(LISTS).map(async k => {
+                if (!(Number(raw[k]) > 0)) return;
+                try {
+                    const r = await origFetch(LISTS[k], { credentials: "include", headers: { Accept: "application/json" } });
+                    const json = await r.json();
+                    if (!r.ok || !validList(k, json)) return;
+                    stats[k] = Object.assign(statFromList(k, json), { raw: Number(raw[k]) });
+                } catch (e) { /* 该类保持原数 */ }
+            }));
+            return stats;
+        };
+        const statsFor = async raw => {
+            if (state.stats && Date.now() - state.statsAt < 30000 && sameRaw(raw)) return state.stats;
+            if (state.pending) return state.pending;
+            state.pending = computeStats(raw).then(s => { if (s) { state.stats = s; state.statsAt = Date.now(); } return s; }).finally(() => { state.pending = null; });
+            return state.pending;
+        };
+        const publish = adjusted => {
+            const u = me();
+            if (u && adjusted) u.unViewedCount = Object.assign({}, adjusted);
+            const card = win.meCard && win.meCard.user;
+            // Pro Max「侧边卡片通知增强」接管了卡片时不触发卡片重渲染，由它的广播更新
+            const extActive = !!doc.querySelector('.user-card .user-stat a[href^="/notification#/atMe"]');
+            if (card && card !== u && adjusted && !extActive) card.unViewedCount = Object.assign({}, adjusted);
+            try { doc.dispatchEvent(new win.CustomEvent("nsx:notify-block", { detail: JSON.stringify({ stats: state.stats, counts: adjusted }) })); } catch (e) { }
+        };
+        const refresh = async raw => {
+            raw = raw || state.raw;
+            if (!raw || !["atMe", "reply", "message"].some(k => Number(raw[k]) > 0)) return null;
+            const stats = await statsFor(raw);
+            if (!stats) return null;
+            const adjusted = adjust(raw, stats);
+            publish(adjusted);
+            return adjusted;
+        };
+        const jsonResponse = (res, data) => {
+            const headers = new win.Headers(res.headers); headers.delete("content-length");
+            return new win.Response(JSON.stringify(data), { status: res.status, statusText: res.statusText, headers });
+        };
+        const kindOf = url => {
+            const p = String(url || "").replace(/^https?:\/\/[^/]+/, "").split(/[?#]/)[0];
+            if (p === "/api/notification/unread-count") return "count";
+            for (const k of Object.keys(LISTS)) if (p === LISTS[k]) return k;
+            return null;
+        };
+        win.fetch = function (input, init) {
+            const url = typeof input === "string" ? input : (input && input.url) || "";
+            const kind = kindOf(url);
+            const method = String((init && init.method) || (input && input.method) || "GET").toUpperCase();
+            if (!kind || method !== "GET") return origFetch.apply(this, arguments);
+            return origFetch.apply(this, arguments).then(async res => {
+                try {
+                    const json = await res.clone().json();
+                    if (kind === "count") {
+                        if (!json || json.success !== true || !json.unreadCount || typeof json.unreadCount !== "object" || json.__nsxAdjusted) return res;
+                        state.raw = Object.assign({}, json.unreadCount);
+                        const adjusted = await refresh(state.raw);
+                        if (!adjusted) return res;
+                        return jsonResponse(res, Object.assign({}, json, { unreadCount: adjusted, __nsxAdjusted: true }));
+                    }
+                    if (!validList(kind, json) || json.__nsxFiltered) return res;
+                    if (!(await loadBlock()) && !ready()) return res;
+                    const s = statFromList(kind, json);
+                    if (state.raw && Number(state.raw[kind]) >= 0) {
+                        state.stats = Object.assign({}, state.stats, { [kind]: Object.assign(s, { raw: Number(state.raw[kind]) }) });
+                    }
+                    const out = Object.assign({}, json, { __nsxFiltered: true });
+                    if (kind === "message") out.msgArray = json.msgArray.filter(row => { const p = peerOf(row); return !isBlocked(p.id, p.name); });
+                    else out.data = json.data.filter(it => !(it && isBlocked(it.commenter_id, it.commenter_name)));
+                    return jsonResponse(res, out);
+                } catch (e) { return res; }
+            });
+        };
+        // DOM 兜底：通知页已渲染的条目（页面先于脚本拉取列表时）
+        const sweep = () => {
+            if (!/^\/notification/.test(win.location.pathname)) return;
+            doc.querySelectorAll(".reply-item, .talk-list > a").forEach(el => {
+                const link = el.querySelector('a[href^="/space/"]') || (el.matches('a[href^="/space/"]') ? el : null);
+                const uid = link && (link.getAttribute("href").match(/^\/space\/(\d+)/) || [])[1];
+                const name = (el.querySelector(".name") || link || {}).textContent;
+                if (!uid && !String(name || "").trim()) return;
+                if (isBlocked(uid, name)) { if (el.dataset.nsxNotifyHidden !== "1") { el.dataset.nsxNotifyHidden = "1"; el.style.setProperty("display", "none", "important"); } }
+                else if (el.dataset.nsxNotifyHidden === "1") { delete el.dataset.nsxNotifyHidden; el.style.removeProperty("display"); }
+            });
+        };
+        let sweepTimer = 0;
+        const scheduleSweep = () => { clearTimeout(sweepTimer); sweepTimer = setTimeout(sweep, 30); };
+        if (/^\/notification/.test(win.location.pathname) && doc.body) {
+            new win.MutationObserver(scheduleSweep).observe(doc.body, { childList: true, subtree: true });
+        }
+        const api = { refresh, sweep, isBlocked, loadBlock, state };
+        win.__nsxNotifyBlock = api;
+        if (/^\/notification/.test(win.location.pathname)) loadBlock().then(sweep);
+        refresh();
+        return api;
+    }
+
+    const notifyBlock = {
+        id: "notifyBlock",
+        order: 205, // 在 userCardExt(200) 之后注册广播监听
+        cfg: { notify_block: { enabled: true } },
+        meta: { notify_block: { label: "隐藏黑名单用户的通知（@我/回复/私信及未读数）", group: "🧭 辅助工具" } },
+        match: ctx => ctx.loggedIn,
+        init(ctx) {
+            if (!ctx.store.get("notify_block.enabled", true)) return;
+            const opts = { localEnabled: !!ctx.store.get("relation.blacklist_enabled", true), globalMode: ctx.store.get("relation.blacklist_mode", "fold") };
+            addScript("nsx-notify-block", `(${nsxNotifyBlockInstall.toString()})(window, Object.assign(${JSON.stringify(opts)}, { adjust: ${nsxAdjustUnread.toString()} }));`);
+            // 「侧边卡片通知增强」经广播显示分项未读：收到原始数字后立即补发调整后的数字
+            let stats = null;
+            const bn = new Broadcast("nsx_notify");
+            document.addEventListener("nsx:notify-block", e => {
+                try {
+                    const d = JSON.parse(e.detail || "{}");
+                    stats = d.stats || stats;
+                    if (d.counts) bn.send({ type: "unreadCount", counts: d.counts, nsxAdjusted: true, timestamp: Date.now() });
+                } catch { }
+            });
+            bn.on(msg => {
+                const data = msg?.data;
+                if (!stats || data?.type !== "unreadCount" || data.nsxAdjusted || !data.counts) return;
+                const counts = nsxAdjustUnread(data.counts, stats);
+                if (JSON.stringify(counts) !== JSON.stringify(data.counts)) bn.send({ type: "unreadCount", counts, nsxAdjusted: true, timestamp: Date.now() });
+            });
+        }
+    };
+
+    const __vite_glob_0_cid_notifyBlock = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
+        __proto__: null,
+        default: notifyBlock
+    }, Symbol.toStringTag, { value: 'Module' }));
+
 
 
     /* ==========================================================================
@@ -3549,7 +3779,7 @@ return new Response(JSON.stringify(Object.assign({},data,{redirect:target,redire
         addScript("nsx-hljs-onload", `(()=>{const r=()=>{if(window.hljs&&typeof hljs.highlightAll==="function")hljs.highlightAll()};document.readyState==="complete"?r():window.addEventListener("load",r,{once:true})})()`);
 
         // 加载模块
-        const mods = /* #__PURE__ */ Object.assign({ "./features/autoJump.js": __vite_glob_0_0, "./features/autoLoading.js": __vite_glob_0_1, "./features/callout.js": __vite_glob_0_5, "./features/codeHighlight.js": __vite_glob_0_6, "./features/commentShortcut.js": __vite_glob_0_7, "./features/replyStay.js": __vite_glob_0_cid_replyStay, "./features/darkMode.js": __vite_glob_0_8, "./features/history.js": __vite_glob_0_9, "./features/imageSlide.js": __vite_glob_0_10, "./features/instantPage.js": __vite_glob_0_11, "./features/levelTag.js": __vite_glob_0_12, "./features/menus.js": __vite_glob_0_13, "./features/quickComment.js": __vite_glob_0_14, "./features/aiComment.js": __vite_glob_0_15, "./features/signIn.js": __vite_glob_0_16, "./features/signinTips.js": __vite_glob_0_17, "./features/smoothScroll.js": __vite_glob_0_18, "./features/userCardExt.js": __vite_glob_0_19, "./features/visitedColor.js": __vite_glob_0_20, "./features/timeChinese.js": __vite_glob_0_21, "./features/emailNavLink.js": __vite_glob_0_22 });
+        const mods = /* #__PURE__ */ Object.assign({ "./features/autoJump.js": __vite_glob_0_0, "./features/autoLoading.js": __vite_glob_0_1, "./features/callout.js": __vite_glob_0_5, "./features/codeHighlight.js": __vite_glob_0_6, "./features/commentShortcut.js": __vite_glob_0_7, "./features/replyStay.js": __vite_glob_0_cid_replyStay, "./features/notifyBlock.js": __vite_glob_0_cid_notifyBlock, "./features/darkMode.js": __vite_glob_0_8, "./features/history.js": __vite_glob_0_9, "./features/imageSlide.js": __vite_glob_0_10, "./features/instantPage.js": __vite_glob_0_11, "./features/levelTag.js": __vite_glob_0_12, "./features/menus.js": __vite_glob_0_13, "./features/quickComment.js": __vite_glob_0_14, "./features/aiComment.js": __vite_glob_0_15, "./features/signIn.js": __vite_glob_0_16, "./features/signinTips.js": __vite_glob_0_17, "./features/smoothScroll.js": __vite_glob_0_18, "./features/userCardExt.js": __vite_glob_0_19, "./features/visitedColor.js": __vite_glob_0_20, "./features/timeChinese.js": __vite_glob_0_21, "./features/emailNavLink.js": __vite_glob_0_22 });
         Object.values(mods).forEach(m => {
             const mod = m?.default;
             if (!mod) return;
